@@ -3,103 +3,85 @@ import requests
 import tempfile
 import base64
 
-# ====== Konfigurasi Streamlit ======
-st.set_page_config(
-    page_title="ElevenLabs TTS Web",
-    layout="centered",
-    initial_sidebar_state="expanded"
-)
+# Ambil API Key dari Streamlit Secrets
+API_KEY = st.secrets["ELEVENLABS_API_KEY"]
+API_URL = "https://api.elevenlabs.io/v1"
 
-st.markdown(
-    """
-    <style>
-    .footer {
-        position: fixed;
-        bottom: 0;
-        width: 100%;
-        text-align: center;
-        font-size: 13px;
-        color: gray;
-        padding: 10px;
-    }
-    </style>
-    """, unsafe_allow_html=True
-)
+st.set_page_config(page_title="ElevenLabs TTS", layout="centered")
+st.title("🎙️ ElevenLabs Text to Speech")
 
-# ====== Sidebar (Mode Gelap / Terang) ======
-theme_mode = st.sidebar.radio("🌓 Theme", ["Light", "Dark"])
-if theme_mode == "Dark":
+# Mode Gelap Toggle
+dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=False)
+if dark_mode:
     st.markdown(
-        """
-        <style>
-        body {
-            background-color: #0e1117;
-            color: white;
-        }
-        </style>
-        """, unsafe_allow_html=True
+        """<style>
+        body { background-color: #1e1e1e; color: white; }
+        textarea, input, select { background-color: #2e2e2e !important; color: white !important; }
+        </style>""",
+        unsafe_allow_html=True
     )
 
-# ====== Judul ======
-st.title("🎙️ ElevenLabs TTS Generator")
+# Get voice list
+def get_voices():
+    headers = {"xi-api-key": API_KEY}
+    r = requests.get(f"{API_URL}/voices", headers=headers)
+    r.raise_for_status()
+    voices = r.json().get("voices", [])
+    return {f"{v['name']} ({v['voice_id']})": v["voice_id"] for v in voices}
 
-# ====== Form Input ======
-with st.form("tts_form"):
-    api_key = st.text_input("🔑 ElevenLabs API Key", type="password")
-    text = st.text_area("📄 Text to Convert", height=150)
-    model_id = st.text_input("🧠 Model ID", value="eleven_multilingual_v2")
-    voice_id = st.text_input("🗣️ Voice ID", value="EXAVITQu4vr4xnSDxMaL")
+with st.expander("📢 Pilih Voice"):
+    voice_dict = get_voices()
+    voice_name = st.selectbox("Voice:", list(voice_dict.keys()))
+    voice_id = voice_dict[voice_name]
 
-    word_count = len(text.split())
-    st.caption(f"📝 Word Count: {word_count}")
+# Teks Input
+text = st.text_area("📝 Masukkan Teks:", height=150)
+word_count = len(text.split())
+st.caption(f"Jumlah kata: {word_count}")
 
-    submitted = st.form_submit_button("🔊 Preview Audio")
+# Model ID
+model_id = st.text_input("🧠 Model ID:", "eleven_multilingual_v2")
 
-# ====== Fungsi Kirim Request ======
-def generate_tts(api_key, text, model_id, voice_id):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
-    headers = {
-        "xi-api-key": api_key,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "text": text,
-        "model_id": model_id,
-        "voice_settings": {
-            "stability": 0.5,
-            "similarity_boost": 0.5
-        }
-    }
-
-    response = requests.post(url, headers=headers, json=payload)
-    response.raise_for_status()
-    return response.content
-
-# ====== Preview Audio ======
-if submitted:
-    if not api_key or not text or not model_id or not voice_id:
-        st.error("❌ Semua input wajib diisi.")
+# Generate Suara
+if st.button("🔊 Generate & Preview"):
+    if not text:
+        st.error("Teks tidak boleh kosong.")
     else:
-        try:
-            audio_data = generate_tts(api_key, text, model_id, voice_id)
-            st.success("✅ Audio berhasil dibuat!")
+        with st.spinner("Menghubungi ElevenLabs..."):
+            headers = {
+                "xi-api-key": API_KEY,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "text": text,
+                "model_id": model_id,
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.5
+                }
+            }
 
-            # Preview audio
-            st.audio(audio_data, format="audio/mp3")
+            url = f"{API_URL}/text-to-speech/{voice_id}/stream"
+            r = requests.post(url, headers=headers, json=payload)
+            if r.status_code == 200:
+                audio = r.content
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as f:
+                    f.write(audio)
+                    audio_path = f.name
 
-            # Simpan sementara buat tombol download
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
-                tmp.write(audio_data)
-                tmp_path = tmp.name
+                # Audio Player
+                st.audio(audio_path, format="audio/mp3")
 
-            # Convert to base64 for download button
-            with open(tmp_path, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode()
-                href = f'<a href="data:audio/mp3;base64,{b64}" download="tts_output.mp3">📥 Download MP3</a>'
+                # Download Link
+                b64 = base64.b64encode(audio).decode()
+                href = f'<a href="data:audio/mp3;base64,{b64}" download="tts_output.mp3">💾 Download MP3</a>'
                 st.markdown(href, unsafe_allow_html=True)
+            else:
+                st.error(f"Gagal: {r.status_code} - {r.text}")
 
-        except requests.exceptions.RequestException as e:
-            st.error(f"❌ Error: {e}")
-
-# ====== Footer ======
-st.markdown('<div class="footer">© 2025 TTS by pipuplan — Powered by ElevenLabs API</div>', unsafe_allow_html=True)
+# Footer
+st.markdown("---")
+st.markdown(
+    '<center><small>Build with ❤️ using ElevenLabs API • by TodTeam 2025</small></center>',
+    unsafe_allow_html=True
+)
