@@ -1,93 +1,105 @@
 import streamlit as st
 import requests
 import tempfile
-import time
+import base64
 
-# Fungsi kirim request ke ElevenLabs
-def send_request(api_key, text, model, voice_id):
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
-    headers = {
-        "xi-api-key": api_key,
-        "Content-Type": "application/json",
-        "xi-model-id": model
+# ====== Konfigurasi Streamlit ======
+st.set_page_config(
+    page_title="ElevenLabs TTS Web",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
+
+st.markdown(
+    """
+    <style>
+    .footer {
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 13px;
+        color: gray;
+        padding: 10px;
     }
-    data = {"text": text}
-    response = requests.post(url, headers=headers, json=data)
-    response.raise_for_status()
-    return response.content
+    </style>
+    """, unsafe_allow_html=True
+)
 
-# ============================
-# ============ UI ============
-# ============================
-
-# Dark mode toggle (simulasi: theme switcher manual)
-st.set_page_config(page_title="ElevenLabs TTS Web", layout="centered")
-
-mode = st.sidebar.selectbox("🌗 Mode Tampilan", ["Light", "Dark"])
-if mode == "Dark":
+# ====== Sidebar (Mode Gelap / Terang) ======
+theme_mode = st.sidebar.radio("🌓 Theme", ["Light", "Dark"])
+if theme_mode == "Dark":
     st.markdown(
         """
         <style>
-        body { background-color: #1e1e1e; color: #f1f1f1; }
-        .stTextInput, .stTextArea, .stButton { background-color: #333; color: white; }
+        body {
+            background-color: #0e1117;
+            color: white;
+        }
         </style>
         """, unsafe_allow_html=True
     )
 
-st.title("🎙️ ElevenLabs TTS Web")
+# ====== Judul ======
+st.title("🎙️ ElevenLabs TTS Generator")
 
-# Input API
-api_key = st.text_input("API Key", type="password")
-text = st.text_area("📝 Masukkan Teks untuk Dibacakan", height=150)
-model_id = st.text_input("Model ID", value="eleven_multilingual_v2")
-voice_id = st.text_input("Voice ID", value="EXAVITQu4vr4xnSDxMaL")
+# ====== Form Input ======
+with st.form("tts_form"):
+    api_key = st.text_input("🔑 ElevenLabs API Key", type="password")
+    text = st.text_area("📄 Text to Convert", height=150)
+    model_id = st.text_input("🧠 Model ID", value="eleven_multilingual_v2")
+    voice_id = st.text_input("🗣️ Voice ID", value="EXAVITQu4vr4xnSDxMaL")
 
-# Hitung kata
-word_count = len(text.strip().split())
-st.caption(f"🔤 Jumlah kata: {word_count} kata")
+    word_count = len(text.split())
+    st.caption(f"📝 Word Count: {word_count}")
 
-# Tombol preview
-if st.button("🎧 Preview"):
-    if not all([api_key, text, model_id, voice_id]):
-        st.error("Harap lengkapi semua input.")
+    submitted = st.form_submit_button("🔊 Preview Audio")
+
+# ====== Fungsi Kirim Request ======
+def generate_tts(api_key, text, model_id, voice_id):
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
+    headers = {
+        "xi-api-key": api_key,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "text": text,
+        "model_id": model_id,
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.5
+        }
+    }
+
+    response = requests.post(url, headers=headers, json=payload)
+    response.raise_for_status()
+    return response.content
+
+# ====== Preview Audio ======
+if submitted:
+    if not api_key or not text or not model_id or not voice_id:
+        st.error("❌ Semua input wajib diisi.")
     else:
         try:
-            with st.spinner("🔄 Menghasilkan audio..."):
-                audio_data = send_request(api_key, text, model_id, voice_id)
-                temp_audio_path = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3").name
-                with open(temp_audio_path, "wb") as f:
-                    f.write(audio_data)
-                time.sleep(1)
-            st.success("✅ Audio siap diputar")
-            st.audio(temp_audio_path, format="audio/mp3")
-        except Exception as e:
-            st.error(f"❌ Terjadi kesalahan: {e}")
+            audio_data = generate_tts(api_key, text, model_id, voice_id)
+            st.success("✅ Audio berhasil dibuat!")
 
-# Tombol download
-if st.button("💾 Simpan sebagai MP3"):
-    if not all([api_key, text, model_id, voice_id]):
-        st.error("Harap lengkapi semua input.")
-    else:
-        try:
-            with st.spinner("🔄 Menghasilkan file..."):
-                audio_data = send_request(api_key, text, model_id, voice_id)
-            st.download_button(
-                label="⬇️ Klik untuk Unduh MP3",
-                data=audio_data,
-                file_name="tts_output.mp3",
-                mime="audio/mpeg"
-            )
-        except Exception as e:
-            st.error(f"❌ Terjadi kesalahan: {e}")
+            # Preview audio
+            st.audio(audio_data, format="audio/mp3")
 
-# ============================
-# ========== FOOTER ==========
-# ============================
+            # Simpan sementara buat tombol download
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+                tmp.write(audio_data)
+                tmp_path = tmp.name
 
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; font-size: 13px; color: gray;'>
-    Dibuat oleh <b>[Pipuplan]</b> · Powered by <a href="https://www.elevenlabs.io/" target="_blank">ElevenLabs API</a><br>
-    Streamlit WebApp TTS – v1.0 · 2025
-</div>
-""", unsafe_allow_html=True)
+            # Convert to base64 for download button
+            with open(tmp_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+                href = f'<a href="data:audio/mp3;base64,{b64}" download="tts_output.mp3">📥 Download MP3</a>'
+                st.markdown(href, unsafe_allow_html=True)
+
+        except requests.exceptions.RequestException as e:
+            st.error(f"❌ Error: {e}")
+
+# ====== Footer ======
+st.markdown('<div class="footer">© 2025 TTS by pipuplan — Powered by ElevenLabs API</div>', unsafe_allow_html=True)
